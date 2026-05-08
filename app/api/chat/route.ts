@@ -12,10 +12,10 @@ export async function POST(req: NextRequest) {
     return new Response("sessionId and message required", { status: 400 });
   }
 
-  const sess = getSession(sessionId);
+  const sess = await getSession(sessionId);
   if (!sess) return new Response("Session not found", { status: 404 });
 
-  const history = getSessionMessages(sessionId);
+  const history = await getSessionMessages(sessionId);
   const convState = new ConversationState(
     sess.state as CounselingState,
     sess.risk_level as "low" | "medium" | "high",

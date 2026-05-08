@@ -8,8 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "better-sqlite3": "^12.9.0",
+    "@neondatabase/serverless": "^1.1.0",
     "elevenlabs": "^1.59.0",
     "groq-sdk": "^1.1.2",
     "next": "16.2.4",

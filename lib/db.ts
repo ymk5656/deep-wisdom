@@ -1,89 +1,100 @@
-import Database from "better-sqlite3";
+import { neon } from "@neondatabase/serverless";
 import { randomBytes } from "crypto";
-import { homedir } from "os";
-import { mkdirSync } from "fs";
-import { dirname, join } from "path";
 
-function dbPath(): string {
-  const raw = process.env.DB_PATH ?? "~/.deep-wisdom/sessions.db";
-  const resolved = raw.startsWith("~") ? join(homedir(), raw.slice(1)) : raw;
-  mkdirSync(dirname(resolved), { recursive: true });
-  return resolved;
+function sql() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL environment variable is not set");
+  return neon(url);
 }
 
-let _db: Database.Database | null = null;
+let schemaReady = false;
 
-function db(): Database.Database {
-  if (!_db) {
-    _db = new Database(dbPath());
-    _db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        session_id  TEXT PRIMARY KEY,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL,
-        state       TEXT NOT NULL DEFAULT 'INIT',
-        risk_level  TEXT NOT NULL DEFAULT 'low'
-      );
-      CREATE TABLE IF NOT EXISTS messages (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id  TEXT NOT NULL,
-        role        TEXT NOT NULL,
-        content     TEXT NOT NULL,
-        emotion_tags TEXT NOT NULL DEFAULT '[]',
-        module_used TEXT,
-        timestamp   TEXT NOT NULL,
-        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-      );
-    `);
-  }
-  return _db;
+async function ensureSchema(): Promise<void> {
+  if (schemaReady) return;
+  const db = sql();
+  await db`
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_id  TEXT PRIMARY KEY,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      state       TEXT NOT NULL DEFAULT 'INIT',
+      risk_level  TEXT NOT NULL DEFAULT 'low'
+    )
+  `;
+  await db`
+    CREATE TABLE IF NOT EXISTS messages (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL,
+      role        TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      emotion_tags TEXT NOT NULL DEFAULT '[]',
+      module_used TEXT,
+      timestamp   TEXT NOT NULL
+    )
+  `;
+  schemaReady = true;
 }
 
-export function createSession(): string {
+export async function createSession(): Promise<string> {
+  await ensureSchema();
   const sessionId = randomBytes(4).toString("hex");
   const now = new Date().toISOString();
-  db().prepare(
-    "INSERT INTO sessions (session_id, created_at, updated_at, state, risk_level) VALUES (?, ?, ?, ?, ?)"
-  ).run(sessionId, now, now, "INIT", "low");
+  await sql()`
+    INSERT INTO sessions (session_id, created_at, updated_at, state, risk_level)
+    VALUES (${sessionId}, ${now}, ${now}, 'INIT', 'low')
+  `;
   return sessionId;
 }
 
-export function getSession(sessionId: string): Record<string, string> | null {
-  const row = db().prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId) as Record<string, string> | undefined;
-  return row ?? null;
+export async function getSession(sessionId: string): Promise<Record<string, string> | null> {
+  await ensureSchema();
+  const rows = await sql()`SELECT * FROM sessions WHERE session_id = ${sessionId}`;
+  return (rows[0] as Record<string, string>) ?? null;
 }
 
-export function listSessions(): Record<string, string>[] {
-  return db().prepare(
-    "SELECT session_id, created_at, updated_at, state, risk_level FROM sessions ORDER BY updated_at DESC"
-  ).all() as Record<string, string>[];
+export async function listSessions(): Promise<Record<string, string>[]> {
+  await ensureSchema();
+  const rows = await sql()`
+    SELECT session_id, created_at, updated_at, state, risk_level
+    FROM sessions ORDER BY updated_at DESC
+  `;
+  return rows as Record<string, string>[];
 }
 
-export function updateSessionState(sessionId: string, state: string, riskLevel?: string): void {
+export async function updateSessionState(sessionId: string, state: string, riskLevel?: string): Promise<void> {
+  await ensureSchema();
   const now = new Date().toISOString();
   if (riskLevel) {
-    db().prepare("UPDATE sessions SET state=?, risk_level=?, updated_at=? WHERE session_id=?")
-      .run(state, riskLevel, now, sessionId);
+    await sql()`
+      UPDATE sessions SET state = ${state}, risk_level = ${riskLevel}, updated_at = ${now}
+      WHERE session_id = ${sessionId}
+    `;
   } else {
-    db().prepare("UPDATE sessions SET state=?, updated_at=? WHERE session_id=?")
-      .run(state, now, sessionId);
+    await sql()`
+      UPDATE sessions SET state = ${state}, updated_at = ${now}
+      WHERE session_id = ${sessionId}
+    `;
   }
 }
 
-export function saveMessage(
+export async function saveMessage(
   sessionId: string,
   role: string,
   content: string,
   moduleUsed?: string,
-): void {
+): Promise<void> {
+  await ensureSchema();
   const now = new Date().toISOString();
-  db().prepare(
-    "INSERT INTO messages (session_id, role, content, emotion_tags, module_used, timestamp) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(sessionId, role, content, "[]", moduleUsed ?? null, now);
+  await sql()`
+    INSERT INTO messages (session_id, role, content, emotion_tags, module_used, timestamp)
+    VALUES (${sessionId}, ${role}, ${content}, '[]', ${moduleUsed ?? null}, ${now})
+  `;
 }
 
-export function getSessionMessages(sessionId: string): { role: string; content: string }[] {
-  return (db().prepare(
-    "SELECT role, content FROM messages WHERE session_id=? ORDER BY id"
-  ).all(sessionId) as { role: string; content: string }[]);
+export async function getSessionMessages(sessionId: string): Promise<{ role: string; content: string }[]> {
+  await ensureSchema();
+  const rows = await sql()`
+    SELECT role, content FROM messages WHERE session_id = ${sessionId} ORDER BY id
+  `;
+  return rows as { role: string; content: string }[];
 }

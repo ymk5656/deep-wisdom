@@ -29,9 +29,9 @@ export class CounselingEngine {
   async *chatStream(userInput: string): AsyncGenerator<string> {
     if (checkCrisis(userInput)) {
       this.convState.triggerCrisis();
-      updateSessionState(this.sessionId, "CRISIS", "high");
-      saveMessage(this.sessionId, "user", userInput);
-      saveMessage(this.sessionId, "assistant", CRISIS_RESPONSE, "crisis");
+      await updateSessionState(this.sessionId, "CRISIS", "high");
+      await saveMessage(this.sessionId, "user", userInput);
+      await saveMessage(this.sessionId, "assistant", CRISIS_RESPONSE, "crisis");
       yield CRISIS_RESPONSE;
       return;
     }
@@ -44,7 +44,7 @@ export class CounselingEngine {
     if (MODULE_HINTS[moduleName]) systemPrompt += MODULE_HINTS[moduleName];
 
     this.history.push({ role: "user", content: userInput });
-    saveMessage(this.sessionId, "user", userInput);
+    await saveMessage(this.sessionId, "user", userInput);
 
     const messages = [{ role: "system" as const, content: systemPrompt }, ...this.history] as Parameters<typeof this.client.chat.completions.create>[0]["messages"];
 
@@ -79,9 +79,9 @@ export class CounselingEngine {
     }
 
     this.history.push({ role: "assistant", content: fullResponse });
-    saveMessage(this.sessionId, "assistant", fullResponse, moduleName);
+    await saveMessage(this.sessionId, "assistant", fullResponse, moduleName);
 
     this.convState.advance(userInput);
-    updateSessionState(this.sessionId, this.convState.state, this.convState.riskLevel);
+    await updateSessionState(this.sessionId, this.convState.state, this.convState.riskLevel);
   }
 }
